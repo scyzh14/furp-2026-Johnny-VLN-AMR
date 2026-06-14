@@ -25,16 +25,16 @@ This is your project home for the FURP programme. **Fork this template**, rename
 
 | Field | Your entry |
 |---|---|
-| Student name(s) | _e.g. Jason Zhang_ |
-| Project title | _..._ |
-| Project tag | _e.g. ROSBootcamp_ |
+| Student name(s) | Ziyang HUANG |
+| Project title | Vision-Language Navigation for an AMR |
+| Project tag | VLN-for-AMR |
 | Track | Research |
-| Supervising faculty | _..._ |
-| Project lead | _..._ |
-| Team or individual | _..._ |
-| Cited paper being replicated | _title + link/DOI_ |
+| Supervising faculty | Dr. Tianxiang Cui |
+| Project lead | Fuhua JIA |
+| Team or individual | Currently individual |
+| Cited paper being replicated | TBD (_title + link/DOI_) |
 
-**One-line summary:** _What is your project about? (1–2 sentences)_
+**One-line summary:** This project aims to build a VLN pipeline for AMR in simulated environments, enabling them to navigate in indoor scenarios based on natural language instructions, and evaluate its robustness by metrics such as success rate, path length and instruction following.
 
 ---
 
