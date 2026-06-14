@@ -30,19 +30,21 @@
 
 <!-- =================  YOUR ENTRIES BELOW  ================= -->
 
-### Week 1 — YYYY-MM-DD
+### Week 1 — 2026-06-14
 
-**Attended this week's meeting:** Yes / No
+**Attended this week's meeting:** Yes
 
 **Progress this week**
 - Set up repository from the FURP template.
-- _..._
+- Choose R2R / Matterport path.
 
 **Challenges & blockers**
-- _..._
+- I've been quite busy this week, so I haven't yet set up the environment.
+- This is my first time dealing with this aspect, and I'm still not very clear about how to install the Linux system.
 
 **Next steps**
-- _..._
+- Attempt to connect the hard drive and use the Linux system in IAMET 406.
+- Complete the tasks for the second week.
 
 **Hours spent (optional):**
 
