@@ -30,6 +30,26 @@
 
 <!-- =================  YOUR ENTRIES BELOW  ================= -->
 
+### Week 2 — 2026-06-22
+
+**Attended this week's meeting:** Yes. But because of the SEP class, I was 30 minutes late. (This was said in the WeChat group)
+
+**Progress this week**
+- Completed the production of Linux2go
+
+**Challenges & blockers**
+- When I was using the mechanical hard drive before, the mounting of some partitions always failed.
+- Later, I discovered that there might be some damage inside, so I bought a new solid-state drive online.
+
+**Next steps**
+- Continue to complete the installation of other software and conduct the smoke test.
+
+**Hours spent (optional):** 
+
+**Links (optional):** 
+
+---
+
 ### Week 1 — 2026-06-14
 
 **Attended this week's meeting:** Yes
