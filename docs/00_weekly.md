@@ -30,6 +30,29 @@
 
 <!-- =================  YOUR ENTRIES BELOW  ================= -->
 
+### Week 3 — 2026-06-29
+
+**Attended this week's meeting:** Yes
+
+**Progress this week**
+- Installed the NVIDIA GPU driver
+- Installed the docker engine
+- Installed the NVIDIA Container Toolkit
+
+**Challenges & blockers**
+- After NVIDIA-Docker2.0 was deprecated, when installing the NVIDIA Container Toolkit, there was a problem of the operating system version not being supported. After referring to the Issues, I didn't use the default .list file. Instead, I created a new .sources file and made the necessary modifications, and successfully installed it.
+- Where can I find the smallest available command to run the smoke test, there is only the Matterport3D Dataset
+
+**Next steps**
+- Try to complete the smoke test
+- Read more articles to have a better understanding of my path
+
+**Hours spent (optional):**
+
+**Links (optional):**
+
+---
+
 ### Week 2 — 2026-06-22
 
 **Attended this week's meeting:** Yes. But because of the SEP class, I was 30 minutes late. (This was said in the WeChat group)
