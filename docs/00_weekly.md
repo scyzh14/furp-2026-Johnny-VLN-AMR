@@ -30,6 +30,28 @@
 
 <!-- =================  YOUR ENTRIES BELOW  ================= -->
 
+### Week 4 — 2026-07-06
+
+**Attended this week's meeting:** Yes
+
+**Progress this week**
+- Built the docker image
+- Completed the simplest smoke test
+- Started to implement the R2R navigation task
+
+**Challenges & blockers**
+- Timeout occurred while downloading resources or pulling images overseas
+- Data download for the R2R navigation task has timed out
+
+**Next steps**
+- Attempt to complete some training tasks
+
+**Hours spent (optional):** 
+
+**Links (optional):** [Week01 Checkpoint](./src/experiments/week01_checkpoint.md)
+
+---
+
 ### Week 3 — 2026-06-29
 
 **Attended this week's meeting:** Yes
