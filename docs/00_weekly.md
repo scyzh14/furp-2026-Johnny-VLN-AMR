@@ -48,7 +48,7 @@
 
 **Hours spent (optional):** 
 
-**Links (optional):** [Week01 Checkpoint](./src/experiments/week01_checkpoint.md)
+**Links (optional):** [Week01 Checkpoint](../src/experiments/week01_checkpoint.md)
 
 ---
 
