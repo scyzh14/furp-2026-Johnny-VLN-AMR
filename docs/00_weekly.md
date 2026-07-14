@@ -30,6 +30,28 @@
 
 <!-- =================  YOUR ENTRIES BELOW  ================= -->
 
+### Week 5 — 2026-07-13
+
+**Attended this week's meeting:** No meeting
+
+**Progress this week**
+- Downloaded the training and validation datasets
+- Downloaded the matterport_skybox_images
+
+**Challenges & blockers**
+- The main difficulty is that I am unable to access Dropbox. However, I found the datasets on HF Mirror, but the image features were not included, and I couldn't find them anywhere else either.
+- Besides, AI also suggests not using precompute_features.py to generate image features. The reason is that the deployment cost of the Caffe environment is extremely high.
+- Secondly, the official Matterport dataset could not be obtained, but the matterport_skybox_images were found in the Tsinghua Cloud Drive.
+
+**Next steps**
+- Try to get the image features to start trainning.
+
+**Hours spent (optional):** 
+
+**Links (optional):** 
+
+---
+
 ### Week 4 — 2026-07-06
 
 **Attended this week's meeting:** Yes
