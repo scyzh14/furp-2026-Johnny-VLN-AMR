@@ -1,0 +1,53 @@
+# Matterport3DSimulator - Modern migration image
+# Target: RTX 5070 Ti (Blackwell, sm_120) + Driver 595.84 + CUDA 12.8 + PyTorch 2.7.x
+# This file does NOT replace the original Dockerfile (preserved for reference).
+#
+# Base image already pulled via daocloud mirror to work around Docker Hub timeout.
+
+FROM docker.m.daocloud.io/nvidia/cuda:12.8.1-cudnn-devel-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# ---------------------------------------------------------------------------
+# System libraries: build tools + MatterSim deps (EGL + OSMesa fallback)
+# Mirrors to tsinghua to speed up apt inside China network.
+# ---------------------------------------------------------------------------
+RUN sed -i 's@//.*archive.ubuntu.com@//mirrors.tuna.tsinghua.edu.cn@g' /etc/apt/sources.list && \
+    sed -i 's@//.*security.ubuntu.com@//mirrors.tuna.tsinghua.edu.cn@g' /etc/apt/sources.list || true && \
+    apt-get update && apt-get install -y --no-install-recommends \
+        build-essential cmake git wget curl ca-certificates \
+        libjsoncpp-dev libepoxy-dev libglm-dev libglew-dev libopencv-dev \
+        libosmesa6 libosmesa6-dev \
+        libegl1 libegl-dev libgl1 libgl-dev libopengl-dev \
+        python3 python3-dev python3-pip python3-setuptools python3-venv \
+        pkg-config && \
+    rm -rf /var/lib/apt/lists/*
+
+# Python 3.10 is the default on ubuntu22.04; verify.
+RUN python3 --version
+
+# ---------------------------------------------------------------------------
+# PyTorch 2.7.x with cu128 (first release supporting Blackwell sm_120).
+# IMPORTANT: PyPI default wheel is cu126 (supports up to sm_90 only).
+# RTX 5070 Ti is sm_120, so we MUST use the official cu128 index.
+# download.pytorch.org is reachable from this network.
+# ---------------------------------------------------------------------------
+ENV PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+RUN python3 -m pip install --upgrade pip && \
+    pip3 install --no-cache-dir \
+        --index-url https://download.pytorch.org/whl/cu128 \
+        torch==2.7.1 torchvision==0.22.1 && \
+    pip3 install --no-cache-dir \
+        numpy==1.26.4 pandas==2.2.3 networkx==3.4.2 opencv-python-headless==4.11.0.86 \
+        pyyaml==6.0.2
+
+# ---------------------------------------------------------------------------
+# MatterSim build happens at container runtime (source mounted via volume),
+# so this image only provides the toolchain.  PYTHONPATH is set so that
+# the compiled MatterSim.so from build/ is importable.
+# ---------------------------------------------------------------------------
+ENV PYTHONPATH=/root/Matterport3DSimulator/build
+WORKDIR /root/Matterport3DSimulator
+
+# Default command: start an interactive shell for building/testing.
+CMD ["/bin/bash"]
