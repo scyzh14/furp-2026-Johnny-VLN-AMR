@@ -90,9 +90,9 @@ modified.
 | 1. Repository audit | Full codebase inspection; modification/inventory report (structure, dependencies, PyTorch & MatterSim compatibility risks); no file changes | Done |
 | 2. Modern Docker environment | `Dockerfile.modern` (CUDA 12.8 + Python 3.10); PyTorch 2.7.1+cu128; GPU recognized by PyTorch on RTX 5070 Ti (sm_120) | Done |
 | 3. MatterSim build | Build Python binding in container (EGL path); fix build-only issues (pybind11, OpenCV4 macro); navigation state-machine test (rendering off) | Done |
-| 4. R2R environment | Verify data flow: R2R dataset → R2RBatch → MatterSim → observations → cached image features; simulator stays in the loop | Not started |
-| 5. PyTorch 2.x migration | Minimal API changes only (`G.node`→`G.nodes`, `mask.byte()`→`mask.bool()`); architecture/loss/metrics unchanged | Not started |
-| 6. Minimal validation | 12-step test chain: torch import → MatterSim → scan → action → R2RBatch → model forward → backward → optimizer step | Not started |
+| 4. R2R environment | Verify data flow: R2R dataset → R2RBatch → MatterSim → observations → cached image features; simulator stays in the loop | Done |
+| 5. PyTorch 2.x migration | Minimal API changes only (`mask.byte()`→`mask.bool()` in agent.py; `G.node`→`G.nodes` already applied in phase 4); architecture/loss/metrics unchanged; model forward/loss/backward/step verified on GPU | Done |
+| 6. Minimal validation | 12-step test chain: torch import → MatterSim → scan → action → R2RBatch → model forward → backward → optimizer step; real `train.py --debug` entry completes 3 iterations | Done |
 | 7. Training | Debug mode (tiny batch/iterations) → small sanity run → full R2R Seq2Seq student-forcing baseline | Not started |
 | 8. Evaluation | Run `eval.py`; output baseline metrics (NE / OSR / SR / SPL) | Not started |
 

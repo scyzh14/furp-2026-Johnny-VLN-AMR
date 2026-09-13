@@ -244,6 +244,227 @@ Artifacts: `build/MatterSim.cpython-310-x86_64-linux-gnu.so` +
 
 ---
 
+## Pitfall 8: networkx 3.x removed `G.node[...]` (phase 4)
+
+### Discovery
+
+As soon as `R2RBatch` exercises the teacher-action path
+(`_shortest_path_action` when the next viewpoint is not currently visible):
+
+```
+AttributeError: 'Graph' object has no attribute 'node'
+```
+
+### Diagnosis
+
+`env.py` calls `self.graphs[scan].node[vp]['position']`. The `Graph.node`
+attribute was deprecated in networkx 2.4 and **removed in networkx 3.x**
+(the modern image pins networkx 3.4.2). The replacement is `Graph.nodes`,
+which returns the same node-attribute view. This is a pure API rename;
+the returned `'position'` attribute (a numpy array set via
+`nx.set_node_attributes`) is unchanged.
+
+### Fix
+
+One line in [env.py:184](tasks/R2R/env.py#L184):
+
+```python
+# before
+self.graphs[state.scanId].node[nextViewpointId]['position'] - pos
+# after
+self.graphs[state.scanId].nodes[nextViewpointId]['position'] - pos
+```
+
+After this single change the full R2R environment data flow ran with no
+further errors (`csv.field_size_limit(sys.maxsize)`,
+`nx.set_node_attributes(..., values=, name=)` keyword call, and
+`all_pairs_dijkstra_path` all work unchanged on Python 3.10 / numpy 1.26 /
+networkx 3.4).
+
+---
+
+## clangd support: compile_commands.json
+
+Re-configured the build with `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON` so clangd
+gets exact include paths/defines (EGL flag, OpenCV4 include path, C++11):
+
+```bash
+cd build
+cmake -DEGL_RENDERING=ON -DCMAKE_EXPORT_COMPILE_COMMANDS=ON ..
+ln -sf build/compile_commands.json ../compile_commands.json   # clangd auto-discovery
+```
+
+The root symlink is git-ignored (machine-specific build artifact). The
+compile database covers all seven translation units, including
+`src/lib_python/MatterSimPython.cpp`.
+
+Note: the database contains container-absolute paths
+(`/root/Matterport3DSimulator/...`, `/usr/include/opencv4`), so clangd
+must run **inside the container** (e.g. VS Code Dev Containers / remote
+clangd); a host-side clangd would not resolve those paths without path
+mapping.
+
+---
+
+## Phase 5: PyTorch 1.1 → 2.7 API audit and minimal migration
+
+### Audit of tasks/R2R/{agent.py, model.py, train.py}
+
+Verified empirically in the container (probe script against torch 2.7.1+cu128),
+not guessed:
+
+| Item | Location | Verdict in torch 2.7 |
+|---|---|---|
+| `mask.byte().cuda()` passed to `attn.data.masked_fill_` | [agent.py:178](tasks/R2R/agent.py#L178) → [model.py:96](tasks/R2R/model.py#L96) | **Hard error**: `RuntimeError: masked_fill_ only supports boolean masks, but got mask with dtype unsigned char` → must change |
+| `from torch.autograd import Variable` / `Variable(t, requires_grad=False)` | model.py, agent.py, train.py | OK (deprecated but functional, zero semantic change) — kept to minimize diff |
+| `pack_padded_sequence(embeds, lengths)` with `lengths` = list of 0-dim tensors | model.py:50 ← agent.py `_sort_batch` | OK (probe passed; batch already sorted descending upstream, so `enforce_sorted=True` default is satisfied) |
+| `h0.cuda(), c0.cuda()` / `.long().cuda()` / `torch.LongTensor(n)` | model.py:42, agent.py:177/191/229 | OK (GPU-only container; device handling left as-is per minimal-change principle) |
+| `attn.data.masked_fill_` via `.data` | model.py:96 | OK (discouraged but functional; avoiding rewrite of attention internals) |
+| `logit[i, idx] = -float('inf')` in-place masking | agent.py:243 | OK (autograd handles index_put) |
+| `logit.max(1)`, `.detach()`, `F.softmax(dim=1)`, `D.Categorical`, `.item()` | agent.py:253-281 | OK (identical semantics in 2.x) |
+| `torch.cuda.manual_seed`, `.cuda()` on models | train.py | OK |
+
+Known original-code quirk (NOT a version issue, not fixed): `action_embeds.squeeze()`
+in model.py:133 collapses the batch dim when `batch_size == 1`; the test uses
+batch 4 (upstream default is 100).
+
+### Probe evidence (torch 2.7.1+cu128)
+
+```
+PROBE1 byte-mask masked_fill_: FAIL -> RuntimeError masked_fill_ only supports
+       boolean masks, but got mask with dtype unsigned char
+PROBE1b bool-mask masked_fill_: OK
+PROBE2 list-of-tensor lengths: OK
+PROBE3 Variable: OK
+```
+
+### Fix (single line, Category B)
+
+[agent.py:178](tasks/R2R/agent.py#L178):
+
+```python
+# before
+mask.byte().cuda(),
+# after
+mask.bool().cuda(),
+```
+
+`mask` is a padding-position comparison (`sorted_tensor == padding_idx`), so
+`.byte()` and `.bool()` carry identical mask semantics; `masked_fill_(-inf)`
+behavior in SoftDotAttention is unchanged.
+
+### Verification: tests/test_agent_forward.py
+
+One full learning step of the ORIGINAL pipeline, asserted stage by stage:
+
+```
+torch 2.7.1+cu128 (cuda 12.8, available=True)
+R2RBatch loaded with 14039 instructions, using splits: train
+[1] R2RBatch ready (14039 instructions, batch=4)
+[2] EncoderLSTM (2093312 params) + AttnDecoderLSTM (6102278 params) on cuda:0
+[3] forward + teacher-forced loss: 33.4266
+[4] backward OK: encoder grad-norm 3.3882, decoder grad-norm 24.4694
+[5] optimizer.step: both optimizers updated parameters
+[6] second iteration with sample feedback: loss 15.4673
+ALL SEQ2SEQ MODEL TESTS PASSED
+```
+
+Coverage: R2RBatch → Seq2SeqAgent.rollout → EncoderLSTM → AttnDecoderLSTM →
+SoftDotAttention (BoolTensor mask) → CrossEntropyLoss(ignore_index='<ignore>')
+→ loss.backward() (non-zero gradient norms asserted) → Adam optimizer.step()
+(parameter tensors asserted changed) → a second iteration with 'sample'
+student-forcing feedback. Architecture, teacher forcing, and loss math are
+untouched. (The LSTM dropout warning is upstream behavior: dropout=0.5 with
+num_layers=1 — left as-is.)
+
+### Net PyTorch migration surface
+
+Exactly **one line** (`mask.byte()` → `mask.bool()`) was required to move the
+whole Seq2Seq training step from torch 1.1 to torch 2.7. Everything else
+(Variable, `.data`, `.cuda()`, list-of-tensor lengths) is verified-compatible
+and intentionally preserved.
+
+---
+
+## Phase 6: real train.py entry on PyTorch 2.7 (debug run)
+
+### Discovery (audit of train.py)
+
+- **No argparse at all**: every knob is a module-level constant
+  (`batch_size=100`, `feedback_method='sample'`,
+  `n_iters=20000`, `model_prefix=...`); `__main__` calls `train_val()`
+  unconditionally. There is no way to run a small config from the CLI.
+- `train_val()` unconditionally creates **full validation environments**
+  for `val_seen` and `val_unseen` (`R2RBatch` + `Evaluation` per split);
+  `train()` runs two full-split `agent.test()` passes per env every
+  `log_every=100` iterations — a debug run must skip these.
+- `train()` unconditionally calls `agent.save()` (≈32 MB per pair) at the
+  end of every interval — must be gated for debug runs.
+- Paths audit: `TRAIN_VOCAB` / `TRAINVAL_VOCAB` exist (so `setup()` writes
+  nothing); `IMAGENET_FEATURES` exists; `RESULT_DIR` / `SNAPSHOT_DIR` /
+  `PLOT_DIR` exist and are empty — a debug run cannot overwrite anything.
+- CUDA/optimizer APIs (`torch.cuda.manual_seed`, `optim.Adam`, `.cuda()`)
+  verified compatible in phase 5.
+
+### Diagnosis
+
+The entry point needed a minimal debug configuration without touching any
+training logic. Constraints: default behavior of `python3 tasks/R2R/train.py`
+(no flag) must remain byte-for-byte equivalent to upstream; debug must use a
+small batch, few iterations, the train split only, no validation, and no
+snapshot writes.
+
+### Fix (Category A/B, ~10 lines in train.py, no algorithm change)
+
+[train.py](tasks/R2R/train.py):
+
+1. `import argparse` + `__main__` gains `--debug` flag. With `--debug`:
+   `batch_size=4`, `n_iters=3`. Without it: constants untouched, so the
+   default full-baseline path is unchanged.
+2. `train_val(debug=False)` gates validation-environment creation
+   (`val_envs = {}` in debug).
+3. `train(..., debug=False)` gates `agent.save(...)` only (CSV loss log
+   still written — it is the iteration evidence).
+
+No change to encoder/decoder/attention, feedback logic, loss, or eval.
+
+### Verification: tests/test_train_debug.py
+
+Launches the **real CLI entry** as a subprocess and asserts the chain
+stage by stage:
+
+```
+[run] /usr/bin/python3 tasks/R2R/train.py --debug (cwd=/root/Matterport3DSimulator)
+Loading image features from img_features/ResNet-152-imagenet.tsv
+Loading navigation graphs for 61 scans
+R2RBatch loaded with 14039 instructions, using splits: train
+Training with sample feedback
+0m 0s (- 0m 0s) (3 100%) train loss: 1.1941
+
+[1] R2RBatch initialized on train split: OK
+[2] Seq2SeqAgent created with original default feedback (sample): OK
+[3] iterations completed: 3/3 (100%), train loss 1.1941: OK
+[4] valid loss produced (forward+backward+optimizer.step all ran): OK
+[5] training log written: tasks/R2R/plots/seq2seq_sample_imagenet_log.csv
+[6] no snapshot checkpoints written (snapshots dir unchanged): OK
+
+TRAIN.PY DEBUG ENTRY TEST PASSED
+```
+
+Loss-log CSV content (one row per log interval, iteration counter reaches
+`n_iters`):
+
+```
+,iteration,train loss
+0,3,1.1940708478291828
+```
+
+`train.py --help` confirms the parser; the no-flag default path is unchanged.
+No new PyTorch 2.x incompatibilities surfaced in the entry point itself —
+the only hard blocker remains the phase-5 `mask.bool()` fix.
+
+---
+
 ## What has been verified
 
 ### GPU verification (phase 2)
@@ -281,19 +502,59 @@ Coverage:
   and no skybox images are read (consistent with the R2R baseline training
   path).
 
+### R2R environment data flow (phase 4, simulator in the loop)
+
+[tests/test_r2r_env.py](tests/test_r2r_env.py), run from the repo root in
+the container:
+
+```
+[1] vocab size=991, tokenizer ready
+R2RBatch loaded with 14039 instructions, using splits: train
+[2] R2RBatch ready: 14039 instructions across 61 scans
+[3] EnvBatch wraps a live MatterSim.Simulator; cached feature store loaded: 10567 viewpoints
+[4] reset() produced 4 observations
+[5] teacher-forced rollout through MatterSim: all 4/4 trajectories reached goal
+ALL R2R ENVIRONMENT DATA-FLOW TESTS PASSED
+```
+
+Coverage (original data flow preserved, no pre-computed teacher table):
+- `R2R_train.json` → 14,039 separate instruction entries across 61 scans;
+  vocab 991; TSV feature store decoded to 10,567 viewpoint entries
+  (36 × 2048 each).
+- `R2RBatch.reset()` drives the **live** `MatterSim.newEpisode` (asserted
+  `env.env.sim` is a `MatterSim.Simulator` instance).
+- Every observation's `feature` is checked with `np.array_equal` against
+  `features[scan_viewpoint][viewIndex]` — i.e. the cached feature is keyed
+  by the simulator's live viewpoint/viewIndex, not assumed in advance.
+- Teacher action indices always reference a real navigable location.
+- A teacher-forced rollout calls `env.step` (→ live `makeAction`); the
+  simulator step counter increments correctly and **all 4 trajectories end
+  exactly at their goal viewpoint (Dijkstra graph distance 0)**, proving
+  the shortest-path teacher supervision stays coupled to live simulator
+  state transitions.
+
 ---
 
-## Change inventory (through phase 3)
+## Change inventory (through phase 6)
 
 | File | Category | Change | Lines |
 |---|---|---|---|
 | [Dockerfile.modern](Dockerfile.modern) | A | New: CUDA 12.8 + PyTorch 2.7.1+cu128 + MatterSim build deps; includes the `libopengl-dev` backfill | +54 |
 | [src/lib/NavGraph.cpp](src/lib/NavGraph.cpp#L59) | C | `CV_LOAD_IMAGE_ANYDEPTH` → `cv::IMREAD_ANYDEPTH` (same-value constant) | 1 |
+| [tasks/R2R/env.py](tasks/R2R/env.py#L184) | B | `G.node[...]` → `G.nodes[...]` (networkx 3.x API rename) | 1 |
+| [tasks/R2R/agent.py](tasks/R2R/agent.py#L179) | B | `mask.byte()` → `mask.bool()` (torch 2.x requires BoolTensor for masked_fill_) | 1 |
+| [tasks/R2R/train.py](tasks/R2R/train.py) | A/B | Minimal `--debug` flag (batch 4 / 3 iters / no validation / no snapshots); default no-flag path unchanged | ~10 |
 | [tests/test_mattersim.py](tests/test_mattersim.py) | New | Minimal state-machine test (does not modify existing code) | +106 |
+| [tests/test_r2r_env.py](tests/test_r2r_env.py) | New | R2R data-flow test with simulator in the loop | +121 |
+| [tests/test_agent_forward.py](tests/test_agent_forward.py) | New | Minimal Seq2Seq forward/loss/backward/step test | +117 |
+| [tests/test_train_debug.py](tests/test_train_debug.py) | New | Real train.py entry, debug run, stage-by-stage assertions | +90 |
+| [.gitignore](.gitignore) | A | Ignore root `compile_commands.json` symlink (clangd build artifact) | 1 |
 
-Untouched: R2R Python code (env/agent/model/train/utils/eval); MatterSim
-core logic (MatterSim.cpp / MatterSimPython.cpp); the original Dockerfile;
-data files.
+Untouched (algorithm): R2R agent/model/train/eval logic and utils data
+processing; MatterSim core logic (MatterSim.cpp / MatterSimPython.cpp);
+the original Dockerfile; data files. The only R2R source edits are the two
+one-line API renames in env.py (networkx) and agent.py (torch), both
+Category B with no behavior change.
 
 ---
 
@@ -313,9 +574,8 @@ committed).
 
 ## TODO
 
-- [ ] Phase 4: R2R environment — `env.py` `G.node`→`G.nodes` (networkx 3.x)
-- [ ] Phase 4: R2R environment — `agent.py` `mask.byte()`→`mask.bool()` (PyTorch 2.x)
-- [ ] Phase 5: Minimal PyTorch API migration (only the two lines above are mandatory)
-- [ ] Phase 6: 12-step minimal validation chain
-- [ ] Phase 7: debug training → full baseline
+- [x] Phase 4: R2R environment — `env.py` `G.node`→`G.nodes` (networkx 3.x); data flow verified
+- [x] Phase 5: minimal PyTorch API migration — `agent.py` `mask.byte()`→`mask.bool()`; forward/loss/backward/step verified
+- [x] Phase 6: real train.py entry — `--debug` config; 3 iterations completed end-to-end
+- [ ] Phase 7: small sanity training → full baseline
 - [ ] Phase 8: eval.py evaluation metrics
