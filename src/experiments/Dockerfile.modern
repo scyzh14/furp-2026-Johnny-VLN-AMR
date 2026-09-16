@@ -39,7 +39,7 @@ RUN python3 -m pip install --upgrade pip && \
         torch==2.7.1 torchvision==0.22.1 && \
     pip3 install --no-cache-dir \
         numpy==1.26.4 pandas==2.2.3 networkx==3.4.2 opencv-python-headless==4.11.0.86 \
-        pyyaml==6.0.2
+        pyyaml==6.0.2 matplotlib==3.10.3
 
 # ---------------------------------------------------------------------------
 # MatterSim build happens at container runtime (source mounted via volume),
