@@ -3,7 +3,7 @@
 This guide walks through the entire pipeline: from building the Docker
 image to training and evaluating the R2R Seq2Seq student-forcing baseline.
 
-Full migration details are in [MIGRATION_LOG.md](MIGRATION_LOG.md).
+Full migration details are in [MIGRATION_LOG.md](experiments/MIGRATION_LOG.md).
 
 ## Prerequisites
 
