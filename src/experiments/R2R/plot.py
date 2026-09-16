@@ -26,7 +26,10 @@ def plot_training_curves():
 
     dfs = {}
     for log in logs:
-        dfs[log] = pd.read_csv('tasks/R2R/plots/'+log)
+        try:
+            dfs[log] = pd.read_csv('tasks/R2R/plots/'+log)
+        except FileNotFoundError:
+            pass  # skip logs that don't exist (e.g. teacher-forcing not trained)
 
     plots = [
         ('Loss', 'loss',['val_seen loss', 'val_unseen loss', 'train loss']),
@@ -48,6 +51,8 @@ def plot_training_curves():
     labels = []
     for i,(title, ylabel, x_vars) in enumerate(plots):
         for log in logs:
+            if log not in dfs:
+                continue
             df = dfs[log]
             x = df['iteration']
             for col_name in x_vars:
@@ -92,19 +97,22 @@ def plot_final_scores():
     for split in ['val_seen']:
         ev = Evaluation([split])
         for i,outfile in enumerate(outfiles):
-            score_summary,scores = ev.score(outfile % split)
+            try:
+                score_summary,scores = ev.score(outfile % split)
+            except FileNotFoundError:
+                continue  # skip result files that don't exist (e.g. teacher-forcing)
             if i == 1:
                 method = 'Teacher-forcing'
-                ax.hist(scores['nav_errors'], bins=range(0,30,3), label=method, normed=True, histtype = 'step', linewidth=2.5, color='C1')
+                ax.hist(scores['nav_errors'], bins=range(0,30,3), label=method, density=True, histtype = 'step', linewidth=2.5, color='C1')
             elif i == 0:
                 method = 'Student-forcing'
-                ax.hist(scores['nav_errors'], bins=range(0,30,3), label=method, alpha=0.7, normed=True, color='C0')
+                ax.hist(scores['nav_errors'], bins=range(0,30,3), label=method, alpha=0.7, density=True, color='C0')
             elif i == 2:
                 method = 'Start locations'
-                ax.hist(scores['nav_errors'], bins=range(0,30,3), label=method, normed=True, histtype = 'step', linewidth=2.5, color='C3')
+                ax.hist(scores['nav_errors'], bins=range(0,30,3), label=method, density=True, histtype = 'step', linewidth=2.5, color='C3')
             elif i == 3:
                 method = 'Random agent'
-                ax.hist(scores['nav_errors'], bins=range(0,30,3), label=method, normed=True, histtype = 'step', linewidth=2.5, color='C2')
+                ax.hist(scores['nav_errors'], bins=range(0,30,3), label=method, density=True, histtype = 'step', linewidth=2.5, color='C2')
     ax.set_title('Val Seen Navigation Error')
     ax.set_xlabel('Error (m)')
     ax.set_ylabel('Frequency')
