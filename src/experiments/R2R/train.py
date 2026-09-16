@@ -167,11 +167,24 @@ def train_val(debug=False):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='R2R Seq2Seq baseline (default config unchanged)')
     parser.add_argument('--debug', action='store_true',
-                        help='debug config: batch_size=4, n_iters=3, train split only, '
-                             'no validation, no snapshots')
+                        help='debug config: train split only, no validation, no snapshots; '
+                             'batch_size=4, n_iters=3 unless overridden below')
+    parser.add_argument('--batch-size', type=int, default=None,
+                        help='override batch_size (debug default 4; useful for short '
+                             'checkpoint/validation runs at the baseline size of 100)')
+    parser.add_argument('--n-iters', type=int, default=None,
+                        help='override n_iters (debug default 3; e.g. 1000 for a short '
+                             'checkpoint/validation run)')
     args = parser.parse_args()
     if args.debug:
-        batch_size = 4
-        n_iters = 3
+        batch_size = args.batch_size if args.batch_size is not None else 4
+        n_iters = args.n_iters if args.n_iters is not None else 3
+    else:
+        # overrides also apply to a normal (validation+snapshots enabled) run;
+        # no override means the upstream defaults (100 / 20000) are untouched
+        if args.batch_size is not None:
+            batch_size = args.batch_size
+        if args.n_iters is not None:
+            n_iters = args.n_iters
     train_val(debug=args.debug)
     #test_submission()
