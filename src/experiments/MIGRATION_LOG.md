@@ -465,7 +465,191 @@ the only hard blocker remains the phase-5 `mask.bool()` fix.
 
 ---
 
-## What has been verified
+## Phase 7: sanity training (100 iters, batch 32)
+
+### Debug entry extension (Category A, ~8 lines)
+
+[train.py](tasks/R2R/train.py) `--debug` gained two optional overrides so the
+same entry serves both the fast smoke test and sanity runs; defaults are
+unchanged:
+
+- `--batch-size` (debug default 4)
+- `--n-iters` (debug default 3)
+
+Sanity command: `python3 tasks/R2R/train.py --debug --batch-size 32 --n-iters 100`
+(train split only, no validation, no snapshot writes — debug semantics).
+
+### Pitfall 9: host NVIDIA driver auto-upgrade breaks all GPU access (blocker)
+
+#### Discovery
+
+Immediately after launching the sanity run, the container was down and
+`docker start` failed:
+
+```
+failed to fulfil mount request: open /run/nvidia-persistenced/socket:
+no such file or directory
+```
+
+#### Diagnosis
+
+On the HOST (not in the repo, not in the container):
+
+```
+$ nvidia-smi
+Failed to initialize NVML: Driver/library version mismatch
+NVML library version: 595.91
+
+$ cat /proc/driver/nvidia/version
+NVRM version: NVIDIA UNIX Open Kernel Module ... 595.84
+
+$ modinfo nvidia | grep version
+version: 595.91.07
+$ dpkg -l | grep nvidia-driver-595
+ii  nvidia-driver-595-open  595.91.07-0ubuntu0.26.04.1
+```
+
+The host driver package was auto-upgraded (unattended-upgrades) from
+595.84 to **595.91.07** since the last GPU run. The userspace libraries
+(NVML etc.) are now 595.91 while the **loaded kernel module is still
+595.84** — the driver stack is split across the reboot boundary. All GPU
+access fails on host and in containers until the kernel module is
+reloaded (practically: reboot, since the display server holds the old
+module).
+
+#### Fix
+
+Host action required (user, with root): **reboot**, or unload/reload the
+nvidia kernel modules (`sudo systemctl stop display-manager; sudo rmmod
+nvidia_uvm nvidia_drm nvidia_modeset nvidia && sudo modprobe nvidia`).
+No repo file can fix this; no repo file was affected by it.
+
+#### Resolution
+
+After host reboot the driver stack is unified at 595.91.07; the stale
+container was removed and recreated from the image with the same bind
+mounts (the compiled `.so` files live on the repo bind mount and survive).
+No repo change was needed — and no commit was made for the driver event.
+One operational note: `docker run ... python3 - <<EOF` needs `-i` or stdin
+is not attached and the script is empty.
+
+### Sanity run (batch 32, 100 iters, debug)
+
+```
+Training with sample feedback
+0m 5s (- 0m 0s) (100 100%) train loss: 1.2051
+```
+
+GPU peak **742 MiB** of 12227 MiB, 45 °C; no snapshots/results written
+(debug); CSV loss log written. Stable, no anomalies.
+
+### Checkpoint/validation run (batch 100, 1000 iters, full pipeline)
+
+`--batch-size` / `--n-iters` overrides were extended to also apply to a
+normal run (without `--debug`), so validation and snapshot saving stay on
+while the iteration count is shortened:
+
+```
+python3 tasks/R2R/train.py --batch-size 100 --n-iters 1000
+```
+
+Selected log (loss + success rate every 100 iters, val on both splits via
+the original eval.py metrics):
+
+```
+ (100 10%) train loss 1.1620  val_seen loss 0.9633 SR 0.048  val_unseen loss 0.9461 SR 0.038
+(1000 100%) train loss 0.9043  val_seen loss 0.8997 SR 0.122  val_unseen loss 0.9221 SR 0.084
+```
+
+Full 1000-iter run with ten validation rounds: **2m51s**. Final metrics
+(iter 1000): val_seen NE 8.24 m / OSR 0.164 / SR 0.122 / SPL 0.109;
+val_unseen NE 8.60 m / OSR 0.115 / SR 0.084 / SPL 0.077 — a healthy
+early-training trajectory (the original paper's fully-trained
+student-forcing sample baseline is about SR 0.22 / 0.17 at 20k iters;
+these 1k-iter numbers are consistent with it).
+
+- GPU peak **1534 MiB** (13% of 12 GB), 56 °C — batch 100 has large headroom.
+- Checkpoints: 10 encoder + 10 decoder pairs (24.4 MB each, 313 MB total)
+  in `tasks/R2R/snapshots/`; 20 validation-result JSONs; both verified
+  loadable with `torch.load(..., weights_only=True)` (enc 7 / dec 9 state
+  keys). These are runtime artifacts (git-ignored), not committed.
+- This run also exercises `eval.py` scoring (NE/OSR/SR/SPL) end to end —
+  Phase 8 evaluation path is already verified on torch 2.7.
+
+---
+
+## Phase 8: standalone evaluation on PyTorch 2.7
+
+### Audit
+
+[eval.py](tasks/R2R/eval.py) is **pure Python** (json / networkx / numpy /
+collections / pprint) with **zero PyTorch imports**. No `Variable`, no
+`.cuda()`, no autograd. The `Evaluation` class reads JSON trajectory files
+and computes NE/OSR/SR/SPL via networkx graph distances. No compatibility
+issue with torch 2.7 is possible — eval.py doesn't touch torch.
+
+Checkpoint loading happens in `agent.py`'s `test()` method (already
+verified in Phase 7 training validation). `eval_seq2seq()` (line 127,
+currently commented out in `__main__`) references a teacher-forcing
+result file that we didn't produce, but this is irrelevant: the
+`Evaluation.score()` method is the actual scorer and works on any
+result JSON.
+
+### Verification: tests/test_eval.py
+
+**(1) Trained model scoring (iter 20000, standalone Evaluation)**
+
+Scored the result JSONs from the final training checkpoint using
+eval.py's `Evaluation` class as a standalone entry point:
+
+```
+val_seen (eval.py standalone):
+  length                 11.1050
+  nav_error              6.2335
+  oracle success_rate    0.4990
+  success_rate           0.3696
+  spl                    0.3106
+  [OK] all metrics match training CSV within 1e-4
+
+val_unseen (eval.py standalone):
+  length                  8.1546
+  nav_error               7.8669
+  oracle success_rate     0.2857
+  success_rate            0.2175
+  spl                     0.1874
+  [OK] all metrics match training CSV within 1e-4
+```
+
+Cross-check: every metric (NE/OSR/SR/SPL/length) matches the training CSV
+final row to within 1e-4 — confirming the standalone eval path and the
+in-training validation path produce identical results.
+
+**(2) Simple agent baselines (eval.py __main__ entry)**
+
+Ran `eval_simple_agents()` (the original `python3 tasks/R2R/eval.py`
+entry) on all three splits:
+
+| Agent | Split | NE (m) | OSR | SR | SPL |
+|---|---|---|---|---|---|
+| Stop | val_seen | 10.19 | 0.000 | 0.000 | 0.000 |
+| Shortest | val_seen | 0.00 | 1.000 | 1.000 | 1.000 |
+| Random | val_seen | 9.49 | 0.211 | 0.163 | 0.149 |
+| Stop | val_unseen | 9.48 | 0.000 | 0.000 | 0.000 |
+| Shortest | val_unseen | 0.00 | 1.000 | 1.000 | 1.000 |
+| Random | val_unseen | 9.22 | 0.215 | 0.160 | 0.140 |
+
+These are the expected reference baselines: Stop (SR=0, never moves),
+Shortest (SR=1, follows optimal path), Random (SR~0.14–0.16). All three
+splits and three agents ran without error on the modern stack.
+
+### Result
+
+**eval.py required zero modifications.** No Category A/B/C/D fix was
+needed. The evaluation pipeline (result JSON → Evaluation.score →
+NE/OSR/SR/SPL) is fully functional on PyTorch 2.7 / CUDA 12.8 /
+RTX 5070 Ti.
+
+
 
 ### GPU verification (phase 2)
 
@@ -543,11 +727,12 @@ Coverage (original data flow preserved, no pre-computed teacher table):
 | [src/lib/NavGraph.cpp](src/lib/NavGraph.cpp#L59) | C | `CV_LOAD_IMAGE_ANYDEPTH` → `cv::IMREAD_ANYDEPTH` (same-value constant) | 1 |
 | [tasks/R2R/env.py](tasks/R2R/env.py#L184) | B | `G.node[...]` → `G.nodes[...]` (networkx 3.x API rename) | 1 |
 | [tasks/R2R/agent.py](tasks/R2R/agent.py#L179) | B | `mask.byte()` → `mask.bool()` (torch 2.x requires BoolTensor for masked_fill_) | 1 |
-| [tasks/R2R/train.py](tasks/R2R/train.py) | A/B | Minimal `--debug` flag (batch 4 / 3 iters / no validation / no snapshots); default no-flag path unchanged | ~10 |
+| [tasks/R2R/train.py](tasks/R2R/train.py) | A/B | Minimal `--debug` flag (batch 4 / 3 iters / no validation / no snapshots) + `--batch-size`/`--n-iters` overrides for sanity runs; default no-flag path unchanged | ~18 |
 | [tests/test_mattersim.py](tests/test_mattersim.py) | New | Minimal state-machine test (does not modify existing code) | +106 |
 | [tests/test_r2r_env.py](tests/test_r2r_env.py) | New | R2R data-flow test with simulator in the loop | +121 |
 | [tests/test_agent_forward.py](tests/test_agent_forward.py) | New | Minimal Seq2Seq forward/loss/backward/step test | +117 |
 | [tests/test_train_debug.py](tests/test_train_debug.py) | New | Real train.py entry, debug run, stage-by-stage assertions | +90 |
+| [tests/test_eval.py](tests/test_eval.py) | New | Standalone eval.py scoring (iter 20000) + simple agent baselines | +79 |
 | [.gitignore](.gitignore) | A | Ignore root `compile_commands.json` symlink (clangd build artifact) | 1 |
 
 Untouched (algorithm): R2R agent/model/train/eval logic and utils data
@@ -577,5 +762,5 @@ committed).
 - [x] Phase 4: R2R environment — `env.py` `G.node`→`G.nodes` (networkx 3.x); data flow verified
 - [x] Phase 5: minimal PyTorch API migration — `agent.py` `mask.byte()`→`mask.bool()`; forward/loss/backward/step verified
 - [x] Phase 6: real train.py entry — `--debug` config; 3 iterations completed end-to-end
-- [ ] Phase 7: small sanity training → full baseline
-- [ ] Phase 8: eval.py evaluation metrics
+- [x] Phase 7: sanity training (batch 32 / 100 iters loss 1.2051, 742 MiB) + full-pipeline run (batch 100 / 1000 iters, val + checkpoints, loss 0.9043, 1534 MiB); full 20k-iter baseline launched
+- [x] Phase 8: standalone eval.py — trained model (iter 20000) scored with Evaluation class, all metrics match training CSV within 1e-4; Stop/Shortest/Random baselines verified; eval.py required zero modifications

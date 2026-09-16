@@ -93,8 +93,8 @@ modified.
 | 4. R2R environment | Verify data flow: R2R dataset → R2RBatch → MatterSim → observations → cached image features; simulator stays in the loop | Done |
 | 5. PyTorch 2.x migration | Minimal API changes only (`mask.byte()`→`mask.bool()` in agent.py; `G.node`→`G.nodes` already applied in phase 4); architecture/loss/metrics unchanged; model forward/loss/backward/step verified on GPU | Done |
 | 6. Minimal validation | 12-step test chain: torch import → MatterSim → scan → action → R2RBatch → model forward → backward → optimizer step; real `train.py --debug` entry completes 3 iterations | Done |
-| 7. Training | Debug mode (tiny batch/iterations) → small sanity run → full R2R Seq2Seq student-forcing baseline | Not started |
-| 8. Evaluation | Run `eval.py`; output baseline metrics (NE / OSR / SR / SPL) | Not started |
+| 7. Training | Smoke (4/3) → sanity (32/100) → checkpoint run (100/1000: val + snapshots verified) → full 20k-iter student-forcing baseline completed (SR 0.370 / 0.218) | Done |
+| 8. Evaluation | Standalone eval.py scoring (iter 20000) on val_seen/val_unseen; all metrics match training CSV within 1e-4; Stop/Shortest/Random baselines verified | Done |
 
 ## Environment
 
